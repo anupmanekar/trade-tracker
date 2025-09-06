@@ -1,35 +1,29 @@
 import time
 import threading
 from api_clients import get_ticker_info, get_current_price_for_ticker
+import redis
+import json
 
 if __name__ == "__main__":
     all_ticker_data = get_ticker_info("")  # Test call to ensure function works
-    # create a multithreaded logic where price of each symbol from all_ticker_data is fetched on a separate thread every 5 seconds
-    # and the price is printed to the console
-    # Make this round-robin so that each symbol is fetched in a separate thread on separate intervals
-    # Improve the logic to fetch the price for each symbol at 1 min interval and print buy alert for each symbol when the price is changing more than 1% for 3 consecutive intervals.
-    # Send the buy alert to redis queue
-    # Use redis queue to store the buy alerts and process them in a separate thread
-    # Use redis pubsub to send the buy alerts to a websocket server
-    # Use a websocket client to connect to the websocket server and print the buy alerts to the console
 
     symbols = [item['symbol'] for item in all_ticker_data['data'] if 'USDT' in item['symbol']] if all_ticker_data and 'data' in all_ticker_data else []
-    #symbols = symbols[:10]
+    interval = 60  # seconds, 1 minute interval
 
-    interval = 0.5  # seconds
+    # Initialize Redis connection
+    redis_client = redis.Redis(host='localhost', port=6379, db=0)
+    redis_queue = "buy_alerts"
 
     def fetch_price_with_delay(symbol, delay):
         time.sleep(delay)
         price_history = []
-        counter = 0
         while True:
-            counter += 1
             price = get_current_price_for_ticker(symbol)
             if price is None or price == 0.0:
                 print(f"Error fetching price for {symbol}")
-                time.sleep(interval * len(symbols))
+                time.sleep(interval)
                 continue
-            print(f"{counter} Current price for {symbol}: {price}")
+            print(f"Current price for {symbol}: {price}")
             price_history.append(price)
             if len(price_history) > 4:
                 price_history.pop(0)
@@ -40,9 +34,16 @@ if __name__ == "__main__":
                     for i in range(3)
                 ]
                 if all(alerts):
-                    print(f"Buy alert for {symbol}: Price changed more than 1% for 3 consecutive intervals:", price_history)
-            time.sleep(interval * len(symbols))
+                    alert = {
+                        "symbol": symbol,
+                        "prices": price_history.copy(),
+                        "message": f"Buy alert for {symbol}: Price changed >1% for 3 consecutive intervals"
+                    }
+                    redis_client.rpush(redis_queue, json.dumps(alert))
+                    print(f"Buy alert sent to Redis for {symbol}: {alert}")
+            time.sleep(interval)
 
     for idx, symbol in enumerate(symbols):
-        thread = threading.Thread(target=fetch_price_with_delay, args=(symbol, idx * interval))
+        thread = threading.Thread(target=fetch_price_with_delay, args=(symbol, idx * 2))
+        thread.daemon = True
         thread.start()
