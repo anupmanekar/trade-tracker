@@ -1,6 +1,7 @@
 import requests
 import json
 import time
+import threading
 
 BITGET_COIN_API = "https://api.bitget.com/api/v2/spot/public/coins?coin={coin}"
 BITGET_SYMBOL_API = "https://api.bitget.com/api/v2/spot/public/symbols?symbol={symbol}"
@@ -48,24 +49,46 @@ def get_current_price_for_ticker(symbol) -> float:
     return None
 
 if __name__ == "__main__":
-    # Program will accept ticker symbol as input
-    ticker_symbol = input("Enter the ticker symbol (e.g., SUIUSDT): ")
-    # Get price info at interval of 1 minute for SUIUSDT ticker and print it. Do this for 10 times.
-    # if price has increased between two intervals is more than 1% and this happens for 3 consecutive intervals, print a buy alert message.
+    all_ticker_data = get_ticker_info("")  # Test call to ensure function works
+    # create a multithreaded logic where price of each symbol from all_ticker_data is fetched on a separate thread every 5 seconds
+    # and the price is printed to the console
+    # Make this round-robin so that each symbol is fetched in a separate thread on separate intervals
+    # Improve the logic to fetch the price for each symbol at 1 min interval and print buy alert for each symbol when the price is changing more than 1% for 3 consecutive intervals.
+    # Send the buy alert to redis queue
+    # Use redis queue to store the buy alerts and process them in a separate thread
+    # Use redis pubsub to send the buy alerts to a websocket server
+    # Use a websocket client to connect to the websocket server and print the buy alerts to the console
 
-    previous_price = 0
-    consecutive_increases = 0
-    for i in range(60):
-        price = get_current_price_for_ticker(ticker_symbol)
-        print(f"Time {i} : Current price for {ticker_symbol}: {price}")
-        if previous_price is not None and price is not None:
-            price_change = price - previous_price
-            if price_change >= previous_price * 0.01:  # Check for 1% increase
-                consecutive_increases += 1
-                if consecutive_increases >= 3:
-                    print(f"Buy alert: Price increased more than 1% for {ticker_symbol} for 3 consecutive intervals.")
-            else:
-                consecutive_increases = 0
-        previous_price = price
-        time.sleep(60)  # wait for 1 minute before next check
+    symbols = [item['symbol'] for item in all_ticker_data['data'] if 'USDT' in item['symbol']] if all_ticker_data and 'data' in all_ticker_data else []
+    #symbols = symbols[:10]
 
+    interval = 0.5  # seconds
+
+    def fetch_price_with_delay(symbol, delay):
+        time.sleep(delay)
+        price_history = []
+        counter = 0
+        while True:
+            counter += 1
+            price = get_current_price_for_ticker(symbol)
+            if price is None or price == 0.0:
+                print(f"Error fetching price for {symbol}")
+                time.sleep(interval * len(symbols))
+                continue
+            print(f"{counter} Current price for {symbol}: {price}")
+            price_history.append(price)
+            if len(price_history) > 4:
+                price_history.pop(0)
+            if len(price_history) == 4:
+                # Check if price changed more than 1% for last 3 consecutive intervals
+                alerts = [
+                    abs(price_history[i+1] - price_history[i]) / price_history[i] > 0.01
+                    for i in range(3)
+                ]
+                if all(alerts):
+                    print(f"Buy alert for {symbol}: Price changed more than 1% for 3 consecutive intervals:", price_history)
+            time.sleep(interval * len(symbols))
+
+    for idx, symbol in enumerate(symbols):
+        thread = threading.Thread(target=fetch_price_with_delay, args=(symbol, idx * interval))
+        thread.start()
