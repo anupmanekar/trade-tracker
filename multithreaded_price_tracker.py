@@ -1,6 +1,6 @@
 import time
 import threading
-from api_clients import get_ticker_info, get_current_price_for_ticker
+from interface.bitget_api import get_ticker_info, get_current_price_for_ticker
 import redis
 import json
 
