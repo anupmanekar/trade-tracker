@@ -48,7 +48,8 @@ def generate_signature(api_secret_key, timestamp, method, request_path, params=N
         if params:
             request_path = request_path + parse_params_to_str(params)
     else:
-        body_str = json.dumps(body) if body else ""
+        body_str = body if body else ""
     prehash = pre_hash(timestamp, method, request_path, body_str)
+    print(f"Prehash string: {prehash}")
     signature = sign(prehash, api_secret_key)
-    return signature.decode("utf-8")
+    return signature
